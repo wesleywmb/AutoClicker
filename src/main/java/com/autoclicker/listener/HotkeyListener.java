@@ -1,105 +1,67 @@
 package com.autoclicker.listener;
 
-import com.autoclicker.ui.AutoClickerUI;
+import com.autoclicker.presenter.IClickController;
 import com.github.kwhat.jnativehook.GlobalScreen;
 import com.github.kwhat.jnativehook.NativeHookException;
 import com.github.kwhat.jnativehook.keyboard.NativeKeyEvent;
 import com.github.kwhat.jnativehook.keyboard.NativeKeyListener;
-
 import javax.swing.SwingUtilities;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.BiConsumer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
 public final class HotkeyListener implements NativeKeyListener {
     private static final Logger LOG = Logger.getLogger(HotkeyListener.class.getName());
+    private final IClickController controller;
+    private final Set<Integer> pressedCodes = ConcurrentHashMap.newKeySet();
+    private volatile BiConsumer<Integer, String> captureCallback;
 
-    private final AutoClickerUI ui;
-    private volatile boolean pressed;
-
-    public HotkeyListener(AutoClickerUI ui) {
-        this.ui = ui;
-    }
-
-    /**
-     * Backward-compatible wrapper.
-     * Prefer {@link #register()}.
-     */
-    public void start() {
-        register();
-    }
-
-    /**
-     * Backward-compatible wrapper.
-     * Prefer {@link #unregister()}.
-     */
-    public void stop() {
-        unregister();
-    }
+    public HotkeyListener(IClickController controller) { this.controller = controller; }
 
     public void register() {
-        silenceJNativeHookLogs();
-
+        silenceLogs();
         try {
-            if (!GlobalScreen.isNativeHookRegistered()) {
-                GlobalScreen.registerNativeHook();
-            }
+            if (!GlobalScreen.isNativeHookRegistered()) GlobalScreen.registerNativeHook();
             GlobalScreen.addNativeKeyListener(this);
         } catch (NativeHookException e) {
-            throw new IllegalStateException("Falha ao registrar hotkey global (JNativeHook): " + e.getMessage(), e);
+            throw new IllegalStateException("Não foi possível registrar o atalho global.", e);
         }
     }
 
     public void unregister() {
+        captureCallback = null;
+        pressedCodes.clear();
         try {
             GlobalScreen.removeNativeKeyListener(this);
-            if (GlobalScreen.isNativeHookRegistered()) {
-                GlobalScreen.unregisterNativeHook();
-            }
+            if (GlobalScreen.isNativeHookRegistered()) GlobalScreen.unregisterNativeHook();
         } catch (NativeHookException e) {
-            LOG.log(Level.FINE, "Falha ao remover hook global", e);
+            LOG.log(Level.FINE, "Falha ao remover o atalho global", e);
         }
     }
 
-    @Override
-    public void nativeKeyPressed(NativeKeyEvent e) {
-        if (pressed) {
-            return;
-        }
+    public void beginCapture(BiConsumer<Integer, String> callback) { captureCallback = callback; }
+    public void cancelCapture() { captureCallback = null; }
 
-        if (isActivationHotkey(e)) {
-            pressed = true;
-            toggleAutoClick();
-        }
-    }
-
-    @Override
-    public void nativeKeyReleased(NativeKeyEvent e) {
-        if (isActivationHotkey(e)) {
-            pressed = false;
+    @Override public void nativeKeyPressed(NativeKeyEvent event) {
+        int code = event.getKeyCode();
+        if (!pressedCodes.add(code)) return;
+        BiConsumer<Integer, String> capture = captureCallback;
+        if (capture != null) {
+            captureCallback = null;
+            SwingUtilities.invokeLater(() -> capture.accept(code, HotkeySupport.displayName(code)));
+        } else if (code == controller.getHotkeyCode() && controller.isActivationAllowed()) {
+            SwingUtilities.invokeLater(controller::toggleClicking);
         }
     }
 
-    @Override
-    public void nativeKeyTyped(NativeKeyEvent e) {
+    @Override public void nativeKeyReleased(NativeKeyEvent event) {
+        pressedCodes.remove(event.getKeyCode());
     }
+    @Override public void nativeKeyTyped(NativeKeyEvent event) {}
 
-    private boolean isActivationHotkey(NativeKeyEvent e) {
-        String pressedKey = NativeKeyEvent.getKeyText(e.getKeyCode());
-        String configured = ui.getConfig().getHotkeyActivation();
-        return pressedKey != null && configured != null && pressedKey.equalsIgnoreCase(configured);
-    }
-
-    private void toggleAutoClick() {
-        SwingUtilities.invokeLater(() -> {
-            if (ui.getConfig().isRunning()) {
-                ui.stopClicking();
-            } else {
-                ui.startClicking();
-            }
-        });
-    }
-
-    private static void silenceJNativeHookLogs() {
+    private static void silenceLogs() {
         Logger logger = Logger.getLogger(GlobalScreen.class.getPackage().getName());
         logger.setLevel(Level.OFF);
         logger.setUseParentHandlers(false);

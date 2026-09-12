@@ -10,10 +10,17 @@ public class AutoClickerConfig {
     private int repeatCount;
     private boolean infiniteRepeat;
     private String hotkeyActivation;
-    private volatile boolean isRunning;
-    
-    private static final double MIN_INTERVAL = 0.001;
-    private static final double MAX_INTERVAL = 60.0;
+    private int hotkeyCode;
+    private int startDelaySeconds;
+    private boolean useFixedPosition;
+    private int fixX;
+    private int fixY;
+
+    public static final double MIN_INTERVAL = 0.001;
+    public static final double MAX_INTERVAL = 60.0;
+    public static final int MAX_REPEAT_COUNT = 999_999;
+    public static final int MAX_START_DELAY = 60;
+    public static final int DEFAULT_HOTKEY_CODE = 64; // NativeKeyEvent.VC_F6
     
     /**
      * Enumeração para botões do mouse
@@ -69,9 +76,13 @@ public class AutoClickerConfig {
         this.mouseButton = MouseButton.LEFT;
         this.clickType = ClickType.SINGLE;
         this.hotkeyActivation = "F6";
-        this.isRunning = false;
+        this.hotkeyCode = DEFAULT_HOTKEY_CODE;
         this.repeatCount = 100;
         this.infiniteRepeat = true;
+        this.startDelaySeconds = 0;
+        this.useFixedPosition = false;
+        this.fixX = 0;
+        this.fixY = 0;
     }
     
     // ==================== Getters e Setters com Validação ====================
@@ -81,11 +92,8 @@ public class AutoClickerConfig {
     }
     
     public void setClickIntervalSeconds(double intervalSeconds) {
-        if (intervalSeconds < MIN_INTERVAL) {
-            intervalSeconds = MIN_INTERVAL;
-        }
-        if (intervalSeconds > MAX_INTERVAL) {
-            intervalSeconds = MAX_INTERVAL;
+        if (!Double.isFinite(intervalSeconds) || intervalSeconds < MIN_INTERVAL || intervalSeconds > MAX_INTERVAL) {
+            throw new IllegalArgumentException("O intervalo deve estar entre 0,001 e 60 segundos.");
         }
         this.clickIntervalSeconds = intervalSeconds;
     }
@@ -103,6 +111,7 @@ public class AutoClickerConfig {
     }
     
     public void setMouseButton(MouseButton mouseButton) {
+        if (mouseButton == null) throw new IllegalArgumentException("Selecione um botão do mouse.");
         this.mouseButton = mouseButton;
     }
     
@@ -111,6 +120,7 @@ public class AutoClickerConfig {
     }
     
     public void setClickType(ClickType clickType) {
+        if (clickType == null) throw new IllegalArgumentException("Selecione um tipo de clique.");
         this.clickType = clickType;
     }
     
@@ -118,16 +128,14 @@ public class AutoClickerConfig {
         return hotkeyActivation;
     }
     
-    public void setHotkeyActivation(String hotkeyActivation) {
-        this.hotkeyActivation = hotkeyActivation;
-    }
-    
-    public boolean isRunning() {
-        return isRunning;
-    }
-    
-    public void setRunning(boolean running) {
-        isRunning = running;
+    public int getHotkeyCode() { return hotkeyCode; }
+
+    public void setHotkey(int code, String displayName) {
+        if (code <= 0 || displayName == null || displayName.isBlank()) {
+            throw new IllegalArgumentException("Tecla de atalho inválida.");
+        }
+        this.hotkeyCode = code;
+        this.hotkeyActivation = displayName;
     }
     
     public int getRepeatCount() {
@@ -135,7 +143,10 @@ public class AutoClickerConfig {
     }
     
     public void setRepeatCount(int repeatCount) {
-        this.repeatCount = Math.max(1, repeatCount);
+        if (repeatCount < 1 || repeatCount > MAX_REPEAT_COUNT) {
+            throw new IllegalArgumentException("A repetição deve estar entre 1 e 999.999.");
+        }
+        this.repeatCount = repeatCount;
     }
     
     public boolean isInfiniteRepeat() {
@@ -146,13 +157,77 @@ public class AutoClickerConfig {
         this.infiniteRepeat = infiniteRepeat;
     }
     
+    public int getStartDelaySeconds() {
+        return startDelaySeconds;
+    }
+
+    public void setStartDelaySeconds(int seconds) {
+        if (seconds < 0 || seconds > MAX_START_DELAY) {
+            throw new IllegalArgumentException("O atraso deve estar entre 0 e 60 segundos.");
+        }
+        this.startDelaySeconds = seconds;
+    }
+
+    public boolean isUseFixedPosition() {
+        return useFixedPosition;
+    }
+
+    public void setUseFixedPosition(boolean useFixedPosition) {
+        this.useFixedPosition = useFixedPosition;
+    }
+
+    public int getFixX() {
+        return fixX;
+    }
+
+    public void setFixX(int fixX) {
+        this.fixX = fixX;
+    }
+
+    public int getFixY() {
+        return fixY;
+    }
+
+    public void setFixY(int fixY) {
+        this.fixY = fixY;
+    }
+
     public void setClicksPerSecond(int cps) {
-        if (cps < 1) cps = 1;
-        if (cps > 1000) cps = 1000;
+        if (cps < 1 || cps > 1000) throw new IllegalArgumentException("A taxa deve estar entre 1 e 1.000 ações/s.");
         setClickIntervalSeconds(1.0 / cps);
     }
     
     public int getClicksPerSecond() {
         return (int) Math.round(1.0 / clickIntervalSeconds);
+    }
+
+    public AutoClickerConfig copy() {
+        AutoClickerConfig copy = new AutoClickerConfig();
+        copy.copyFrom(this);
+        return copy;
+    }
+
+    public void copyFrom(AutoClickerConfig other) {
+        if (other == null) throw new IllegalArgumentException("Configuração ausente.");
+        setClickIntervalSeconds(other.getClickIntervalSeconds());
+        setMouseButton(other.getMouseButton());
+        setClickType(other.getClickType());
+        setRepeatCount(other.getRepeatCount());
+        setInfiniteRepeat(other.isInfiniteRepeat());
+        setHotkey(other.getHotkeyCode(), other.getHotkeyActivation());
+        setStartDelaySeconds(other.getStartDelaySeconds());
+        setUseFixedPosition(other.isUseFixedPosition());
+        setFixX(other.getFixX());
+        setFixY(other.getFixY());
+    }
+
+    public void validate() {
+        if (!Double.isFinite(clickIntervalSeconds) || clickIntervalSeconds < MIN_INTERVAL || clickIntervalSeconds > MAX_INTERVAL) {
+            throw new IllegalArgumentException("O intervalo deve estar entre 0,001 e 60 segundos.");
+        }
+        if (mouseButton == null || clickType == null) throw new IllegalArgumentException("Configuração de mouse inválida.");
+        if (repeatCount < 1 || repeatCount > MAX_REPEAT_COUNT) throw new IllegalArgumentException("Repetição inválida.");
+        if (startDelaySeconds < 0 || startDelaySeconds > MAX_START_DELAY) throw new IllegalArgumentException("Atraso inválido.");
+        if (hotkeyCode <= 0 || hotkeyActivation == null || hotkeyActivation.isBlank()) throw new IllegalArgumentException("Tecla de atalho inválida.");
     }
 }
